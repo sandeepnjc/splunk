@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:edifact="http://www.mulesoft.org/schema/mule/edifact"
+	xmlns:scripting="http://www.mulesoft.org/schema/mule/scripting"
+	xmlns:kafka="http://www.mulesoft.org/schema/mule/kafka"
+	xmlns:wsc="http://www.mulesoft.org/schema/mule/wsc" xmlns:sap="http://www.mulesoft.org/schema/mule/sap"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core
+	http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+	http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+	http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+	http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+	http://www.mulesoft.org/schema/mule/sap http://www.mulesoft.org/schema/mule/sap/current/mule-sap.xsd
+	http://www.mulesoft.org/schema/mule/wsc http://www.mulesoft.org/schema/mule/wsc/current/mule-wsc.xsd
+	http://www.mulesoft.org/schema/mule/kafka http://www.mulesoft.org/schema/mule/kafka/current/mule-kafka.xsd
+	http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/current/mule-scripting.xsd
+	http://www.mulesoft.org/schema/mule/edifact http://www.mulesoft.org/schema/mule/edifact/current/mule-edifact.xsd">
+	
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="3f54bd76-251a-4215-a411-27b2a0e4fca7" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<http:request-config name="HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="705e5ac8-4864-41f2-8948-f31b5a989b7b" basePath="/api/timezone" >
+		<http:request-connection host="worldtimeapi.org" />
+	</http:request-config>
+	<edifact:config name="EDIFACT_EDI_Config" doc:name="EDIFACT EDI Config" doc:id="f14959b1-20fb-4f01-9b48-298d0701fad0" >
+		<edifact:connection />
+	</edifact:config>
+	<flow name="splunk" doc:id="5ff6f283-7ce8-4145-a3b6-3e9063b5ae9f" >
+		<http:listener doc:name="Listener" doc:id="001d9f3f-a6a4-4c3d-9d1d-ffccc5ca4985" config-ref="HTTP_Listener_config" path="/timezone/{region}/{city}" allowedMethods="GET">
+			<repeatable-in-memory-stream />
+			<http:error-response statusCode="#[vars.httpStatusCode]" >
+				<http:body ><![CDATA[#[payload]]]></http:body>
+			</http:error-response>
+		</http:listener>
+		<set-variable value="#[attributes.uriParams.region]" doc:name="Set Variable" doc:id="9e34dc1b-493f-4846-b5b0-90fedf4bf67a" variableName="region"/>
+		<set-variable value="#[attributes.uriParams.city]" doc:name="Set Variable" doc:id="916b5adb-a7ef-43cb-a842-d701e2f88e04" variableName="city"/>
+		<logger level="INFO" doc:name="Logger" doc:id="6ac6ce37-7444-416f-82ca-d69f5797c2dc" message="#[payload]"/>
+		<http:request method="GET" doc:name="Request" doc:id="f9cac6e2-c0d1-440c-934c-827a793a8a87" config-ref="HTTP_Request_configuration" path="/{region}/{city}">
+			<http:uri-params ><![CDATA[#[output application/java
+---
+{
+    city : vars.city,
+    region : vars.region
+}]]]></http:uri-params>
+		</http:request>
+		<logger level="INFO" doc:name="Logger" doc:id="ea1bdaed-71ff-40fa-8011-60154ccb9065" message="#['Process Completed']"/>
+		<error-handler >
+			<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="a95f7e07-c453-4336-b579-b75539f63500" type="HTTP:NOT_FOUND">
+				<ee:transform doc:name="Transform Message" doc:id="04d8ffbd-a8f2-4a1f-a381-2ea63cca3144" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    message:error.description
+}]]></ee:set-payload>
+					</ee:message>
+					<ee:variables >
+                        <ee:set-variable variableName="httpStatusCode" ><![CDATA[404]]></ee:set-variable>
+                    </ee:variables>
+				</ee:transform>
+				<logger level="ERROR" doc:name="Logger" doc:id="0f1fdf6f-df7a-4052-b4e9-a945cb7cfa13" message="#[payload]"/>
+			</on-error-propagate>
+			<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="513ac20c-fa99-4040-ba05-fb11a86c7b69" type="ANY">
+				<ee:transform doc:name="Transform Message" doc:id="306c63f0-9a97-4fcb-9dcb-d1fedafa885e" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	message:error.description
+}]]></ee:set-payload>
+					</ee:message>
+					<ee:variables >
+                        <ee:set-variable variableName="httpStatusCode" ><![CDATA[500]]></ee:set-variable>
+                    </ee:variables>
+				</ee:transform>
+				<logger level="INFO" doc:name="Logger" doc:id="1d68734e-aa96-41ab-b531-565567b0b1e2" />
+			</on-error-propagate>
+		</error-handler>
+	</flow>
+</mule>
